@@ -1,0 +1,75 @@
+name: Build and Analyze
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-analyze:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better SonarCloud analysis
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Setup Java (required for SonarScanner)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Cache SonarCloud packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      - name: Install SonarScanner
+        shell: powershell
+        run: |
+          dotnet tool install --global dotnet-sonarscanner
+
+      - name: Create SonarCloud Project (if not exists)
+        uses: nelsoncanarinho/setup-sonar-action@v1.0.0
+        with:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_ORGANIZATION: wctc-net-database
+          SONAR_PROJECT_KEY: WCTC-Net-Database_${{ github.event.repository.name }}
+          SONAR_PROJECT_NAME: ${{ github.event.repository.name }}
+        continue-on-error: true  # Don't fail if project already exists
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Begin SonarCloud Analysis
+        shell: powershell
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          dotnet sonarscanner begin `
+            /k:"WCTC-Net-Database_${{ github.event.repository.name }}" `
+            /o:"wctc-net-database" `
+            /d:sonar.token="${{ secrets.SONAR_TOKEN }}" `
+            /d:sonar.host.url="https://sonarcloud.io" `
+            /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml"
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: End SonarCloud Analysis
+        shell: powershell
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          dotnet sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
